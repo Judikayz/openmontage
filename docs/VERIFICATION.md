@@ -1,28 +1,11 @@
 # Verification status for this package revision
 
-## Checks performed in the packaging environment
+The implementation has expanded substantially beyond the original scaffold. Static checks completed: Python syntax compilation, SQLite migration execution for all migrations, workflow YAML parsing, and API TypeScript compilation with temporary Cloudflare type declarations. Frontend TSX syntax was parsed/transpiled.
 
-- TypeScript/TSX syntax transpilation completed for the Worker API, R2 signer, Cloudflare Access verifier and dashboard source.
-- Both model-cache Python scripts and the existing tool worker Python entrypoints passed Python syntax compilation.
-- D1 migrations `0001_init.sql` and `0002_models.sql` were applied to an in-memory SQLite database successfully.
-- `apps/api/wrangler.toml` parsed as valid TOML.
-- All GitHub Actions workflow YAML files parsed successfully after quoting the branch expression. CI no longer references nonexistent package-lock files; it installs dependencies and runs the API typecheck as well as tests.
-- R2 presigned PUT and GET URL smoke checks produced 64-character SigV4 signatures with the expected credential/query fields.
+The full dependency-backed frontend build and Vitest/API package typecheck could not be completed because npm registry access timed out in the build environment. Live Cloudflare deployment, D1 remote migrations, R2 multipart upload, GitHub dispatch, Hugging Face model import, Kaggle GPU execution, and actual AI inference were not run because they require external credentials/services and suitable compute.
 
-- The GitHub runner now fetches each job payload through an authenticated internal endpoint, marks the job running, and reports completed/failed status through the callback endpoint. The callback endpoint rejects requests when its token is unset.
+Model import now supports multipart R2 uploads for individual files larger than 5 GiB. It pins the model revision, reads the repository manifest, downloads files with retry/resume, verifies expected sizes and Hugging Face LFS SHA-256 when provided, then stores the files in R2. Private/gated model access uses the encrypted Hugging Face token through authenticated importer endpoints. The importer does not certify model licence compatibility or runtime compatibility.
 
-## Not verified
+Worker adapters are real execution integrations, not placeholders: Diffusers pipeline execution for supported video models; Diffusers IP-Adapter conditioning for character-reference image generation; Wav2Lip invocation when a licensed checkout and checkpoint are supplied; FFmpeg finishing; and FFmpeg clip/audio assembly. They fail explicitly when required models, assets, binaries or checkpoints are missing. No model weights are bundled and no GPU render was verified.
 
-- `npm install`, frontend production build, API typecheck and Vitest suite: npm registry access timed out in this environment, so dependencies could not be installed. TypeScript syntax checks are not a substitute for a full typecheck/build.
-- Live Cloudflare Worker deployment, Cloudflare Access login, D1 remote migrations, R2 credential test against a real account, GitHub dispatch in your repository, Hugging Face model import, R2 upload/download, or GitHub cache restore.
-- Kaggle model staging, actual Kaggle GPU inference, AI video generation, character identity validation, lip-sync inference, cinematic enhancement, stock-media providers, email/WhatsApp delivery and a separately deployed OpenMontage endpoint.
-
-## Model import boundaries
-
-The new model library supports public Hugging Face repositories. It pins the current repository commit SHA at registration, downloads the file manifest, retries/resumes HTTP downloads while the runner job remains alive, checks file sizes and Hugging Face LFS SHA-256 where provided, and uploads each file through a short-lived object-scoped presigned R2 PUT URL. The Worker checks the stored object sizes before marking the model ready.
-
-Files larger than 5 GiB are not supported because the importer currently uses single-part PUT, not multipart uploads. Private/gated repositories, arbitrary URLs, and cross-runner partial-download persistence are not implemented. GitHub runner disk/time quotas may prevent very large model imports. GitHub cache is optional and evictable; R2 is the durable source. Kaggle does not share GitHub cache and its R2 staging path is not yet implemented.
-
-## Existing platform limitations
-
-The tool branch worker entrypoints remain execution-contract scaffolds and do not perform real model inference. The frontend character editor, full timezone-aware recurring schedule editor, stock-media search, and complete email/WhatsApp delivery are not finished. No real video render was produced during verification. See `docs/INTEGRATIONS.md`, `docs/LICENCES.md` and `docs/MODEL_LIBRARY.md`.
+The Kaggle execution path still requires a secure external dispatcher. GitHub-hosted runners do not have GPUs by default. The frontend small-asset uploader currently uses base64 JSON; multipart browser uploads for large source media are not yet implemented. Granular RBAC/team invitation UI is not implemented; use Cloudflare Access allowlists.

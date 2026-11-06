@@ -10,7 +10,7 @@ def fetch(key):
 def walk(value,parent=''):
  if isinstance(value,dict):
   for k,v in list(value.items()):
-   if k in ('inputVideo','videoAsset','audioAsset') and isinstance(v,str):value[k]=fetch(v)
+   if k in ('inputVideo','videoAsset','audioAsset','imageAsset','inputImage','initImage') and isinstance(v,str):value[k]=fetch(v)
    elif k in ('referenceAssets','inputVideos','assetKeys') and isinstance(v,list):value[k]=[fetch(x) if isinstance(x,str) else x for x in v]
    else:walk(v,k)
  elif isinstance(value,list):

@@ -63,6 +63,8 @@ jobs:
           CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
           WORKER_CALLBACK_TOKEN: ${{ secrets.WORKER_CALLBACK_TOKEN }}
           JOB_ID: ${{ inputs.job_id }}
+          TOOL: ${{ inputs.tool }}
+          WAV2LIP_REPO_URL: ${{ secrets.WAV2LIP_REPO_URL }}
           OMCS_MODEL_CACHE: ~/.cache/omcs-models
         run: |
           set +e
@@ -70,6 +72,7 @@ jobs:
           install_status=$?
           export MODEL_DIR="$HOME/.cache/omcs-models"
           if [ "$install_status" -eq 0 ]; then
+            if [ "$TOOL" = "lip-sync" ] && [ -n "$WAV2LIP_REPO_URL" ]; then git clone --depth 1 "$WAV2LIP_REPO_URL" /tmp/Wav2Lip && export WAV2LIP_HOME=/tmp/Wav2Lip; fi
             export JOB_PAYLOAD_JSON="$(python -c 'import os,base64;print(base64.b64decode(os.environ["JOB_PAYLOAD_JSON_B64"]).decode())')"
             python infra/worker/stage_assets.py
             stage_status=$?

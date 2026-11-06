@@ -1,0 +1,32 @@
+name: Import model into R2
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: Registered model ID in the control plane
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: model-import-${{ inputs.model_id }}
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install importer dependencies
+        run: python -m pip install --disable-pip-version-check requests
+      - name: Download, verify and store model
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          MODEL_IMPORT_WORKER_TOKEN: ${{ secrets.MODEL_IMPORT_WORKER_TOKEN }}
+          MODEL_ID: ${{ inputs.model_id }}
+        run: python infra/model-cache/import_model.py

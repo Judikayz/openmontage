@@ -30,7 +30,7 @@ def main():
     except Exception as e: raise SystemExit(f'Diffusers video runtime unavailable: {e}. Install a compatible Diffusers release and model dependencies.')
     model_id=str(path)
     dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-    pipeline_class=os.environ.get('OM_PIPELINE_CLASS')
+    pipeline_class=job.get('pipelineClass') or os.environ.get('OM_PIPELINE_CLASS')
     if pipeline_class:
         module,name=pipeline_class.rsplit('.',1);import importlib;pipe_cls=getattr(importlib.import_module(module),name);pipe=pipe_cls.from_pretrained(model_id,torch_dtype=dtype,local_files_only=True)
     else: pipe=DiffusionPipeline.from_pretrained(model_id,torch_dtype=dtype,local_files_only=True)
@@ -40,6 +40,12 @@ def main():
     if job.get('negativePrompt'):kwargs['negative_prompt']=job['negativePrompt']
     for key in ('num_frames','num_inference_steps','guidance_scale'):
         if job.get(key) is not None:kwargs[key]=job[key]
+    if 'num_frames' not in kwargs and job.get('duration'):
+        kwargs['num_frames']=max(8,int(float(job['duration'])*int(job.get('fps',24))))
+    image_asset=job.get('imageAsset') or job.get('inputImage')
+    if image_asset:
+        image_key=job.get('imageArgument','image')
+        kwargs[image_key]=Image.open(image_asset).convert('RGB')
     if job.get('seed') not in (None,''):kwargs['generator']=torch.Generator(device='cuda' if torch.cuda.is_available() else 'cpu').manual_seed(int(job['seed']))
     result=pipe(**kwargs)
     frames=getattr(result,'frames',None)

@@ -4,6 +4,7 @@ on:
     inputs:
       job_id: {description: Control-plane job ID, required: true, type: string}
       tool: {description: Tool branch key, required: true, type: string}
+      model_ids: {description: Comma-separated registered model IDs, required: false, type: string}
 permissions: {contents: read}
 jobs:
   execute:
@@ -13,13 +14,33 @@ jobs:
       - uses: actions/checkout@v4
         with: {ref: main}
       - uses: actions/checkout@v4
-        with: {ref: ${{ inputs.tool }} , path: tool-src}
+        with:
+          ref: "${{ inputs.tool }}"
+          path: tool-src
       - uses: actions/setup-python@v5
         with: {python-version: '3.11', cache: pip, cache-dependency-path: tool-src/requirements.txt}
+      - uses: actions/cache@v4
+        if: ${{ inputs.model_ids != '' }}
+        with:
+          path: ~/.cache/omcs-models
+          key: omcs-models-${{ hashFiles('infra/model-cache/cache-key.sh', 'tool-src/requirements.txt') }}-${{ inputs.model_ids }}
+          restore-keys: |
+            omcs-models-${{ hashFiles('infra/model-cache/cache-key.sh', 'tool-src/requirements.txt') }}-
+      - name: Restore model weights from cache or R2
+        if: ${{ inputs.model_ids != '' }}
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          MODEL_IMPORT_WORKER_TOKEN: ${{ secrets.MODEL_IMPORT_WORKER_TOKEN }}
+          MODEL_IDS: ${{ inputs.model_ids }}
+          OMCS_MODEL_CACHE: ~/.cache/omcs-models
+        run: |
+          python -m pip install --disable-pip-version-check requests
+          python infra/model-cache/restore_models.py
       - name: Validate job and execute contract
         env:
           CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
           WORKER_CALLBACK_TOKEN: ${{ secrets.WORKER_CALLBACK_TOKEN }}
+          OMCS_MODEL_CACHE: ~/.cache/omcs-models
           JOB_ID: ${{ inputs.job_id }}
           TOOL_BRANCH: ${{ inputs.tool }}
         run: |

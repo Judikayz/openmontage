@@ -1,33 +1,38 @@
 # OpenMontage Cloud Studio
 
-Independent cloud control plane for video-production workflows. This repository does **not** contain or fork the original OpenMontage source. It integrates with a separately deployed OpenMontage instance through an HTTP adapter contract.
+Independent cloud control plane for video-production workflows. This repository does **not** contain, clone or recreate the original `Judikayz/openmontage` source. It connects to a separately deployed OpenMontage instance through an adapter contract.
 
-## What is implemented
+## Model Library added
 
-- Responsive Vite/React control dashboard and workflow editor.
-- Cloudflare Worker API, D1 schema/migrations, R2 signed-object access, AES-GCM encrypted provider secrets.
-- Workflow/job CRUD, compute routing (`automatic|github|kaggle`), authenticated GitHub dispatch, worker callbacks, scheduled due-job dispatch, Telegram/email/WhatsApp notification adapters.
-- Kaggle kernel submission adapter using the Kaggle CLI process and a generated `kernel-metadata.json`; GPU tasks only.
-- Separate tool contracts and Docker runtime definitions on real Git branches (see `branches/`).
-- Persistent model registry/cache manifest. R2 is the durable cache; GitHub Actions cache is only an opportunistic cache.
+The dashboard now includes a Model Library and dedicated R2 configuration. Register a public Hugging Face repository using a model name, URL/ID and category. The control plane queues a GitHub Actions import job, inspects the repository file manifest, downloads and verifies files, and stores them in a dedicated Cloudflare R2 bucket. The R2 S3 credentials are encrypted in D1 and are never sent to GitHub Actions. The Worker issues short-lived object-scoped upload/download URLs.
 
-## Important verification boundary
+GitHub-executed jobs can include registered model IDs. The runner checks the GitHub Actions cache first and restores missing files from R2. R2 is the durable source of truth; GitHub cache is temporary and may be evicted. A runner still needs local disk copies while inference runs. See `docs/MODEL_LIBRARY.md` and `infra/model-cache/README.md`.
 
-This is a functional control-plane implementation, not a claim that heavyweight model inference has been run. No model weights are bundled. GPU inference, Kaggle account/quota availability, provider credentials, and a separately deployed OpenMontage endpoint must be supplied and tested in your accounts. The tool branches deliberately fail clearly when required model/runtime assets are absent; they do not return fake video outputs. See `docs/VERIFICATION.md` and `docs/LICENCES.md`.
+**Current model-import boundaries:** public Hugging Face repositories only; one file must be no larger than 5 GiB (single-part PUT); GitHub runner disk/time quotas apply. Private/gated Hugging Face repositories, arbitrary download URLs, multipart uploads and Kaggle model staging are not implemented. The importer does not prove model inference compatibility or model licence suitability.
 
-## Repository branches
+## Existing platform scope
 
-`main`, `ai-video-generation`, `character-consistency`, `lip-sync`, `cinematic-realism`, `openmontage-integration`. All are real Git branches and are included in `openmontage-cloud-studio.bundle`.
+- Responsive React/Vite dashboard and workflow editor.
+- Cloudflare Worker API, D1 migrations, separate R2 asset and model buckets.
+- AES-256-GCM encrypted provider credentials.
+- Cloudflare Access JWT verification for dashboard API authentication; do not put API credentials in `VITE_*` variables.
+- Workflow/job records, automatic/GitHub/Kaggle routing, GitHub Actions dispatch and a basic Cloudflare Cron scheduler.
+- Kaggle CLI submission adapter and separate tool contracts on real Git branches.
+
+This is not yet a fully verified production video-generation studio. No large model weights are bundled, and no real GPU inference was run in this environment. Tool-specific model execution, Kaggle R2 staging, full recurring schedule semantics, and live integration credentials still require deployment and account-level tests. Read `docs/VERIFICATION.md` before treating any component as production-ready.
+
+## Real Git branches
+
+`main`, `ai-video-generation`, `character-consistency`, `lip-sync`, `cinematic-realism`, `openmontage-integration`. The repository includes `openmontage-cloud-studio.bundle` with branch references.
 
 ## Quick start
 
-1. Create a Cloudflare D1 database and R2 bucket.
-2. Configure Worker secrets (`ENCRYPTION_KEY`, `APP_AUTH_TOKEN`, `GITHUB_TOKEN`, optional provider credentials).
-3. Set D1 database ID and R2 bucket binding in `apps/api/wrangler.toml`.
-4. Apply migrations: `cd apps/api && npx wrangler d1 migrations apply DB --remote`.
-5. Deploy Worker: `npx wrangler deploy`.
-6. Deploy `apps/web` to Netlify with `VITE_API_BASE_URL` and `VITE_APP_TOKEN` configured. For production, replace the simple bearer-token login gate with an OIDC/Cloudflare Access identity integration before exposing it publicly.
-7. Configure GitHub repository secrets `CONTROL_PLANE_URL` and `WORKER_CALLBACK_TOKEN`; add the Worker dispatch credentials on the Cloudflare side.
-8. Upload this repository to a new GitHub repository. Do not upload it over `Judikayz/openmontage`.
+1. Create Cloudflare D1 database `omcs`, R2 bucket `omcs-assets`, and private R2 bucket `omcs-models`.
+2. Configure `apps/api/wrangler.toml` with your D1 database ID and exact Netlify origin.
+3. Apply migrations and deploy the Worker. Set `ENCRYPTION_KEY`, `MODEL_IMPORT_WORKER_TOKEN`, GitHub dispatch credentials and callback token as Worker secrets.
+4. Protect the Worker API with a Cloudflare Access application. Set `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` as Worker variables and allow only your account.
+5. Deploy `apps/web` to Netlify with `VITE_API_BASE_URL` only. Do not add secrets or bearer tokens as frontend environment variables.
+6. Add GitHub repository Actions secrets `CONTROL_PLANE_URL`, `MODEL_IMPORT_WORKER_TOKEN` and `WORKER_CALLBACK_TOKEN`.
+7. Save your R2 S3 credentials once in the dashboard Settings, test the connection, then add public Hugging Face models in Model Library.
 
-Detailed steps: `docs/DEPLOYMENT.md`.
+Detailed steps: `docs/DEPLOYMENT.md`, `docs/MODEL_LIBRARY.md` and `docs/BRANCHES.md`.

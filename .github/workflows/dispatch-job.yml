@@ -83,8 +83,11 @@ jobs:
           export CALLBACK_STATUS CALLBACK_ERROR
           python - <<'PY'
           import json, os, urllib.request, pathlib
-          try: result=json.loads(pathlib.Path('worker-result.json').read_text()) if pathlib.Path('worker-result.json').exists() else {'runner':'github-actions'}
-          except Exception: result={'runner':'github-actions','output_parse_error':True}
+          result={'runner':'github-actions'}
+          if pathlib.Path('worker-result.json').exists():
+              for line in reversed(pathlib.Path('worker-result.json').read_text(errors='replace').splitlines()):
+                  try: result=json.loads(line); break
+                  except Exception: continue
           body=json.dumps({'status':os.environ['CALLBACK_STATUS'],'error':os.environ['CALLBACK_ERROR'],'result':result}).encode()
           req=urllib.request.Request(os.environ['CONTROL_PLANE_URL'].rstrip('/')+'/callback/'+os.environ['JOB_ID'],data=body,headers={'content-type':'application/json','x-worker-callback-token':os.environ['WORKER_CALLBACK_TOKEN']},method='POST')
           with urllib.request.urlopen(req,timeout=60) as response: print('Control plane callback:',response.status)

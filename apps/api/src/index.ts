@@ -1,22 +1,33 @@
 import { encryptSecret, decryptSecret } from './crypto';
-import { routeJob } from './routing';
+import { routeJob, validateToolBranch } from './routing';
 import { presignR2Put, presignR2Get } from './r2-presign';
 import { verifyCloudflareAccess } from './access-auth';
 import type { Env, JobInput } from './types';
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','access-control-allow-origin':'null','access-control-allow-headers':'authorization,content-type,x-worker-callback-token,x-model-import-token,cf-access-jwt-assertion','access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS'}});
 const now=()=>new Date().toISOString(); const id=()=>crypto.randomUUID();
 async function auth(req:Request,env:Env){if(env.APP_AUTH_TOKEN&&req.headers.get('authorization')===`Bearer ${env.APP_AUTH_TOKEN}`)return true;if(!env.CF_ACCESS_TEAM_DOMAIN||!env.CF_ACCESS_AUD)return false;return verifyCloudflareAccess(req,env.CF_ACCESS_TEAM_DOMAIN,env.CF_ACCESS_AUD);}
-async function dispatchGitHub(env:Env,jobId:string,tool:string,modelIds:string[]=[]){
- if(!env.GITHUB_TOKEN||!env.GITHUB_OWNER||!env.GITHUB_REPO) throw new Error('GitHub dispatch is not configured');
- const url=`https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/dispatch-job.yml/dispatches`;
- const r=await fetch(url,{method:'POST',headers:{authorization:`Bearer ${env.GITHUB_TOKEN}`,'content-type':'application/json','accept':'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'omcs-control-plane'},body:JSON.stringify({ref:'main',inputs:{job_id:jobId,tool,model_ids:modelIds.join(',')}})});
- if(!r.ok) throw new Error(`GitHub dispatch failed (${r.status}): ${await r.text()}`);
+async function getGitHubConfig(env:Env){
+ let saved:any=null;
+ const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='github'").first<any>();
+ if(row){try{saved=JSON.parse(await decryptSecret(row.ciphertext,row.iv,env.ENCRYPTION_KEY));}catch{throw new Error('Saved GitHub credential could not be decrypted; save it again in Settings');}}
+ const token=typeof saved==='string'?saved:(saved?.token??saved?.accessToken??env.GITHUB_TOKEN);
+ const owner=(typeof saved==='object'&&saved?.owner)||env.GITHUB_OWNER;
+ const repo=(typeof saved==='object'&&saved?.repo)||env.GITHUB_REPO;
+ const ref=(typeof saved==='object'&&saved?.ref)||'main';
+ if(!token||!owner||!repo)throw new Error('GitHub is not configured. Save a GitHub token in Settings and set GITHUB_OWNER and GITHUB_REPO as Worker variables, or save token, owner and repo as JSON.');
+ return {token,owner,repo,ref};
+}
+async function githubDispatch(env:Env,workflow:string,inputs:Record<string,string>){
+ const gh=await getGitHubConfig(env);
+ const url=`https://api.github.com/repos/${gh.owner}/${gh.repo}/actions/workflows/${workflow}/dispatches`;
+ const r=await fetch(url,{method:'POST',headers:{authorization:`Bearer ${gh.token}`,'content-type':'application/json','accept':'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'omcs-control-plane'},body:JSON.stringify({ref:gh.ref,inputs})});
+ if(!r.ok)throw new Error(`GitHub ${workflow} dispatch failed (${r.status}): ${await r.text()}`);
+}
+async function dispatchGitHub(_env:Env,jobId:string,tool:string,modelIds:string[]=[]){
+ await githubDispatch(_env,'dispatch-job.yml',{job_id:jobId,tool,model_ids:modelIds.join(',')});
 }
 async function dispatchModelImport(env:Env,modelId:string){
- if(!env.GITHUB_TOKEN||!env.GITHUB_OWNER||!env.GITHUB_REPO) throw new Error('GitHub dispatch is not configured');
- const url=`https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/model-import.yml/dispatches`;
- const r=await fetch(url,{method:'POST',headers:{authorization:`Bearer ${env.GITHUB_TOKEN}`,'content-type':'application/json','accept':'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'omcs-control-plane'},body:JSON.stringify({ref:'main',inputs:{model_id:modelId}})});
- if(!r.ok) throw new Error(`Model import dispatch failed (${r.status}): ${await r.text()}`);
+ await githubDispatch(env,'model-import.yml',{model_id:modelId});
 }
 async function getR2Credentials(env:Env){
  const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='r2'").first<any>();
@@ -33,7 +44,9 @@ function parseHfRepo(value:string){
 }
 async function workerAuth(req:Request,env:Env){return !!env.MODEL_IMPORT_WORKER_TOKEN && req.headers.get('x-model-import-token')===env.MODEL_IMPORT_WORKER_TOKEN;}
 async function createJob(env:Env,input:JobInput){
- if(!input.tool||!input.payload||typeof input.payload!=='object') throw new Error('tool and object payload are required');
+ if(!input.tool)throw new Error('tool is required');
+ validateToolBranch(input.tool);
+ if(!input.payload||typeof input.payload!=='object'||Array.isArray(input.payload)) throw new Error('tool and object payload are required');
  const provider=routeJob(input), jobId=id(), ts=now();
  if(input.idempotencyKey){const old=await env.DB.prepare('SELECT id,status,provider FROM jobs WHERE idempotency_key=?').bind(input.idempotencyKey).first<any>();if(old)return old;}
  await env.DB.prepare('INSERT INTO jobs(id,workflow_id,status,provider,tool,payload_json,idempotency_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(jobId,input.workflowId??null,'queued',provider,input.tool,JSON.stringify(input.payload),input.idempotencyKey??null,ts,ts).run();
@@ -55,7 +68,16 @@ async function handle(req:Request,env:Env){
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:{'access-control-allow-origin':'null','access-control-allow-headers':'authorization,content-type,x-worker-callback-token,x-model-import-token,cf-access-jwt-assertion','access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS'}});
  const url=new URL(req.url), path=url.pathname;
  if(path==='/health')return json({ok:true,service:'omcs-api'});
- if(path.startsWith('/callback/')){if(req.headers.get('x-worker-callback-token')!==env.WORKER_CALLBACK_TOKEN)return json({error:'Unauthorized'},401);const jobId=path.split('/').pop()!;const b=await req.json<any>();await env.DB.prepare('UPDATE jobs SET status=?,result_json=?,error=?,updated_at=? WHERE id=?').bind(b.status,b.result?JSON.stringify(b.result):null,b.error??null,now(),jobId).run();return json({ok:true});}
+ if(path.startsWith('/callback/')){if(!env.WORKER_CALLBACK_TOKEN||req.headers.get('x-worker-callback-token')!==env.WORKER_CALLBACK_TOKEN)return json({error:'Unauthorized'},401);const jobId=path.split('/').pop()!;const b=await req.json<any>();if(!['completed','failed','running'].includes(b.status))return json({error:'Invalid callback status'},400);const result=await env.DB.prepare('UPDATE jobs SET status=?,result_json=?,error=?,updated_at=? WHERE id=?').bind(b.status,b.result?JSON.stringify(b.result):null,b.error??null,now(),jobId).run();if(!result.meta?.changes)return json({error:'Job not found'},404);return json({ok:true});}
+ if(path.startsWith('/internal/jobs/')){
+  if(!env.WORKER_CALLBACK_TOKEN||req.headers.get('x-worker-callback-token')!==env.WORKER_CALLBACK_TOKEN)return json({error:'Unauthorized'},401);
+  const jobId=path.split('/').pop()!;
+  if(req.method!=='GET')return json({error:'Method not allowed'},405);
+  const job=await env.DB.prepare('SELECT id,status,provider,tool,payload_json FROM jobs WHERE id=?').bind(jobId).first<any>();
+  if(!job)return json({error:'Job not found'},404);
+  await env.DB.prepare('UPDATE jobs SET status=?,updated_at=? WHERE id=?').bind('running',now(),jobId).run();
+  return json({id:job.id,status:'running',provider:job.provider,tool:job.tool,payload:JSON.parse(job.payload_json)});
+ }
  if(path.startsWith('/internal/models/')){
   if(!(await workerAuth(req,env))) return json({error:'Unauthorized'},401);
   const parts=path.split('/').filter(Boolean), modelId=parts[2], action=parts[3];
@@ -109,4 +131,4 @@ async function handle(req:Request,env:Env){
  }catch(e){return json({error:String(e instanceof Error?e.message:e)},400);}
 }
 export default {fetch:async(req:Request,env:Env)=>{const response=await handle(req,env);const headers=new Headers(response.headers);const origin=req.headers.get('origin');const allowed=env.ALLOWED_ORIGIN??'';if(origin&&origin===allowed){headers.set('access-control-allow-origin',origin);headers.set('access-control-allow-credentials','true');headers.append('vary','Origin');}return new Response(response.body,{status:response.status,statusText:response.statusText,headers});},async scheduled(_event:ScheduledController,env:Env,ctx:ExecutionContext){ctx.waitUntil(runScheduler(env));}};
-async function runScheduler(env:Env){const due=await env.DB.prepare('SELECT * FROM schedules WHERE enabled=1 AND next_run_at<=? LIMIT 25').bind(now()).all<any>();for(const s of due.results??[]){const lease=`schedule:${s.id}:${s.next_run_at}`;try{await env.DB.prepare('UPDATE schedules SET next_run_at=? WHERE id=? AND next_run_at=?').bind(new Date(Date.now()+5*60*1000).toISOString(),s.id,s.next_run_at).run();const wf=await env.DB.prepare('SELECT * FROM workflows WHERE id=?').bind(s.workflow_id).first<any>();if(wf){const c=JSON.parse(wf.config_json);await createJob(env,{workflowId:wf.id,tool:c.tool??'workflow',compute:c.compute??'automatic',requiresGpu:!!c.requiresGpu,payload:c,idempotencyKey:lease});}}catch(e){console.error('schedule dispatch failed',s.id,String(e));}}}
+async function runScheduler(env:Env){const due=await env.DB.prepare('SELECT * FROM schedules WHERE enabled=1 AND next_run_at<=? LIMIT 25').bind(now()).all<any>();for(const s of due.results??[]){const lease=`schedule:${s.id}:${s.next_run_at}`;try{await env.DB.prepare('UPDATE schedules SET next_run_at=? WHERE id=? AND next_run_at=?').bind(new Date(Date.now()+5*60*1000).toISOString(),s.id,s.next_run_at).run();const wf=await env.DB.prepare('SELECT * FROM workflows WHERE id=?').bind(s.workflow_id).first<any>();if(wf){const c=JSON.parse(wf.config_json);await createJob(env,{workflowId:wf.id,tool:c.tool??'openmontage-integration',compute:c.compute??'automatic',requiresGpu:!!c.requiresGpu,payload:c,idempotencyKey:lease});}}catch(e){console.error('schedule dispatch failed',s.id,String(e));}}}

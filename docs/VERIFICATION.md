@@ -6,8 +6,10 @@
 - Both model-cache Python scripts and the existing tool worker Python entrypoints passed Python syntax compilation.
 - D1 migrations `0001_init.sql` and `0002_models.sql` were applied to an in-memory SQLite database successfully.
 - `apps/api/wrangler.toml` parsed as valid TOML.
-- All GitHub Actions workflow YAML files parsed successfully after quoting the branch expression.
+- All GitHub Actions workflow YAML files parsed successfully after quoting the branch expression. CI no longer references nonexistent package-lock files; it installs dependencies and runs the API typecheck as well as tests.
 - R2 presigned PUT and GET URL smoke checks produced 64-character SigV4 signatures with the expected credential/query fields.
+
+- The GitHub runner now fetches each job payload through an authenticated internal endpoint, marks the job running, and reports completed/failed status through the callback endpoint. The callback endpoint rejects requests when its token is unset.
 
 ## Not verified
 

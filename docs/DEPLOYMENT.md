@@ -9,7 +9,7 @@
 5. From `apps/api`, run `npx wrangler d1 migrations apply omcs --remote`, then `npx wrangler deploy`.
 6. Generate an AES key with `openssl rand -base64 32`; set it using `npx wrangler secret put ENCRYPTION_KEY`.
 7. Generate a separate random token for model-import workers. Set `npx wrangler secret put MODEL_IMPORT_WORKER_TOKEN`.
-8. Set GitHub dispatch secrets in the Worker: `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, and `WORKER_CALLBACK_TOKEN`. Use a fine-grained GitHub token with repository Actions workflow-dispatch permission and minimum required repository access.
+8. Set Worker variables `GITHUB_OWNER` and `GITHUB_REPO`, plus secret `WORKER_CALLBACK_TOKEN`. Save a GitHub fine-grained token in Settings → Other provider credentials → `github` (as a token or JSON containing `token`, `owner`, `repo`, and optional `ref`). The token needs repository Actions workflow-dispatch permission. For headless deployments, `GITHUB_TOKEN` can be set as a Worker secret instead.
 9. Set Worker variables `CF_ACCESS_TEAM_DOMAIN` (team domain only, e.g. `your-team.cloudflareaccess.com`) and `CF_ACCESS_AUD` (the Access application audience tag). `MODEL_BUCKET_NAME` is `omcs-models`.
 
 ## 2. Cloudflare Access (required for production)
@@ -23,13 +23,13 @@ Create a Cloudflare Access self-hosted application for the Worker API hostname. 
 3. In repository **Settings → Secrets and variables → Actions**, add:
    - `CONTROL_PLANE_URL`: deployed Worker URL.
    - `MODEL_IMPORT_WORKER_TOKEN`: exactly the same random value as the Worker secret.
-   - `WORKER_CALLBACK_TOKEN`: callback credential used by the existing job callback flow.
+   - `WORKER_CALLBACK_TOKEN`: shared credential used by the runner to fetch jobs and report completion.
 4. Enable GitHub Actions. Standard GitHub-hosted runners are CPU-only; they do not provide GPUs.
 
 ## 4. Netlify frontend
 
 1. Import the new repository.
-2. Set base directory `apps/web`, build command `npm ci && npm run build`, publish directory `dist`.
+2. Set base directory `apps/web`, build command `npm install && npm run build`, publish directory `dist`.
 3. Set only `VITE_API_BASE_URL` to the deployed Worker URL. Never put Cloudflare, GitHub, Kaggle, R2, AI-provider or API bearer credentials in `VITE_*` variables.
 4. Ensure the Worker `ALLOWED_ORIGIN` exactly matches the Netlify site origin, including `https://` and without a trailing slash.
 
@@ -43,4 +43,4 @@ The Kaggle adapter uses the Kaggle CLI/kernel submission process and requires va
 
 ## 7. Local checks
 
-Run `npm ci && npm run build` in `apps/web`, and `npm ci && npm test && npm run typecheck` in `apps/api` in an environment with package-registry access. Run Python syntax checks for `infra/model-cache/*.py`. The current build environment used to package this update could not reach npm registry, so frontend/backend package builds were not verified here.
+Run `npm install && npm run build` in `apps/web`, and `npm install && npm run typecheck && npm test` in `apps/api` in an environment with package-registry access. Run Python syntax checks for `infra/model-cache/*.py`. The current build environment used to package this update could not reach npm registry, so frontend/backend package builds were not verified here.

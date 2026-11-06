@@ -26,7 +26,7 @@ export async function presignR2MultipartPart(input:{accountId:string;accessKeyId
  const path=`/${enc(input.bucket)}/${input.key.split('/').map(enc).join('/')}`;
  const scope=`${date}/${region}/${service}/aws4_request`;
  const params=new URLSearchParams({'X-Amz-Algorithm':'AWS4-HMAC-SHA256','X-Amz-Credential':`${input.accessKeyId}/${scope}`,'X-Amz-Date':stamp,'X-Amz-Expires':String(input.expires??900),'X-Amz-SignedHeaders':'host','partNumber':String(input.partNumber),'uploadId':input.uploadId});
- const canonicalQuery=[...params.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${enc(k)}=${enc(v)}`).join('&');
+ const canonicalQuery=Array.from((params as any).entries() as Iterable<[string,string]>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${enc(k)}=${enc(v)}`).join('&');
  const canonicalRequest=`PUT\n${path}\n${canonicalQuery}\nhost:${host}\nhost\nUNSIGNED-PAYLOAD`;
  const stringToSign=`AWS4-HMAC-SHA256\n${stamp}\n${scope}\n${await sha(canonicalRequest)}`;
  const kDate=await hmac('AWS4'+input.secretAccessKey,date),kRegion=await hmac(kDate,region),kService=await hmac(kRegion,service),kSigning=await hmac(kService,'aws4_request');

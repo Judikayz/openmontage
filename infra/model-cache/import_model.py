@@ -8,6 +8,7 @@ BASE = os.environ['CONTROL_PLANE_URL'].rstrip('/')
 TOKEN = os.environ['MODEL_IMPORT_WORKER_TOKEN']
 MODEL_ID = os.environ['MODEL_ID']
 HEADERS = {'x-model-import-token': TOKEN}
+HF_TOKEN = None
 SESSION = requests.Session()
 PARTIAL_ROOT = pathlib.Path(tempfile.gettempdir()) / f'omcs-model-import-{MODEL_ID}'
 PARTIAL_ROOT.mkdir(parents=True, exist_ok=True)
@@ -48,17 +49,33 @@ def download_resumable(url, dest, expected):
             if attempt == 5: raise
             time.sleep(min(2 ** attempt, 30))
 
+def upload_multipart(path, local, expected):
+    init = api('POST', f'/internal/models/{MODEL_ID}/multipart-init', json={'path': path})
+    parts, part_size, number = [], 128 * 1024 * 1024, 1
+    with local.open('rb') as stream:
+        while True:
+            chunk = stream.read(part_size)
+            if not chunk: break
+            signed = api('POST', f'/internal/models/{MODEL_ID}/multipart-part-url', json={'path': path, 'partNumber': number})
+            response = SESSION.put(signed['uploadUrl'], data=chunk, headers={'content-length': str(len(chunk))}, timeout=(30, 900))
+            response.raise_for_status()
+            etag = response.headers.get('ETag') or response.headers.get('etag')
+            if not etag: raise RuntimeError(f'R2 did not return an ETag for multipart part {number}')
+            parts.append({'partNumber': number, 'etag': etag.strip('"')})
+            print(f'Uploaded multipart part {number}: {len(chunk):,} bytes', flush=True)
+            number += 1
+    api('POST', f'/internal/models/{MODEL_ID}/multipart-complete', json={'path': path, 'parts': parts})
+
 def main():
+    global HF_TOKEN
+    token_info = api('GET', f'/internal/models/{MODEL_ID}/hf-token')
+    HF_TOKEN = token_info.get('token')
     manifest = api('GET', f'/internal/models/{MODEL_ID}/manifest')
     repo, revision, files = manifest['repo_id'], manifest['revision'], manifest['files']
     total = sum(int(f.get('size', 0)) for f in files)
     print(f"Importing {repo}@{revision}: {len(files)} files, {total:,} bytes")
-    # R2 single-PUT objects are limited to 5 GiB. Fail explicitly rather than corrupting a model.
-    limit = 5 * 1024**3
     for item in files:
         path, expected = item['path'], int(item.get('size', 0))
-        if expected > limit:
-            fail(f"{path} is larger than the supported 5 GiB single-upload limit; multipart import is required.")
         url = f"https://huggingface.co/{repo}/resolve/{quote(revision, safe='')}/{quote(path, safe='/')}?download=true"
         print(f"Downloading {path} ({expected:,} bytes)", flush=True)
         local = PARTIAL_ROOT / hashlib.sha256(path.encode()).hexdigest()
@@ -71,16 +88,19 @@ def main():
             local.unlink(missing_ok=True)
             fail(f"SHA-256 verification failed for {path}")
         # Refresh the signed URL on retry; R2 credentials never leave the control plane.
-        for attempt in range(1, 4):
-            signed = api('POST', f'/internal/models/{MODEL_ID}/upload-url', json={'path': path})
-            try:
-                with local.open('rb') as stream:
-                    uploaded = SESSION.put(signed['uploadUrl'], data=stream, headers={'content-length': str(local.stat().st_size)}, timeout=(30, 900))
-                    uploaded.raise_for_status()
-                break
-            except Exception:
-                if attempt == 3: raise
-                time.sleep(2 ** attempt)
+        if local.stat().st_size > 5 * 1024**3:
+            upload_multipart(path, local, expected)
+        else:
+            for attempt in range(1, 4):
+                signed = api('POST', f'/internal/models/{MODEL_ID}/upload-url', json={'path': path})
+                try:
+                    with local.open('rb') as stream:
+                        uploaded = SESSION.put(signed['uploadUrl'], data=stream, headers={'content-length': str(local.stat().st_size)}, timeout=(30, 900))
+                        uploaded.raise_for_status()
+                    break
+                except Exception:
+                    if attempt == 3: raise
+                    time.sleep(2 ** attempt)
         print(f"Stored {path}: {local.stat().st_size:,} bytes", flush=True)
         local.unlink(missing_ok=True)
     result = api('POST', f'/internal/models/{MODEL_ID}/complete', json={})

@@ -52,9 +52,11 @@ jobs:
           )
           with urllib.request.urlopen(req, timeout=60) as response:
               job = json.load(response)
-          payload = json.dumps(job['payload'], separators=(',', ':'))
+          import base64
+          payload = json.dumps(job['payload'], separators=(',', ':')).encode()
+          encoded = base64.b64encode(payload).decode()
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as envfile:
-              envfile.write(f"JOB_PAYLOAD_JSON={payload}\n")
+              envfile.write(f"JOB_PAYLOAD_JSON_B64={encoded}\n")
           PY
       - name: Execute tool and report result
         env:
@@ -64,34 +66,28 @@ jobs:
           OMCS_MODEL_CACHE: ~/.cache/omcs-models
         run: |
           set +e
-          python -m pip install -r tool-src/requirements.txt
+          python -m pip install --disable-pip-version-check -r tool-src/requirements.txt
           install_status=$?
           export MODEL_DIR="$HOME/.cache/omcs-models"
           if [ "$install_status" -eq 0 ]; then
-            python tool-src/worker.py --job-id "$JOB_ID" --control-plane "$CONTROL_PLANE_URL"
-            worker_status=$?
-          else
-            worker_status=$install_status
-          fi
-          if [ "$worker_status" -eq 0 ]; then
-            CALLBACK_STATUS=completed
-            CALLBACK_ERROR=""
-          else
-            CALLBACK_STATUS=failed
-            CALLBACK_ERROR="Tool worker exited with code $worker_status"
-          fi
+            export JOB_PAYLOAD_JSON="$(python -c 'import os,base64;print(base64.b64decode(os.environ["JOB_PAYLOAD_JSON_B64"]).decode())')"
+            python infra/worker/stage_assets.py
+            stage_status=$?
+            if [ "$stage_status" -eq 0 ]; then
+              export JOB_PAYLOAD_JSON="$(cat /tmp/omcs-job-payload.json)"
+              python tool-src/worker.py --job-id "$JOB_ID" --control-plane "$CONTROL_PLANE_URL" > worker-result.json
+              worker_status=$?
+            else worker_status=$stage_status; fi
+          else worker_status=$install_status; fi
+          if [ "$worker_status" -eq 0 ]; then CALLBACK_STATUS=completed; CALLBACK_ERROR=""; else CALLBACK_STATUS=failed; CALLBACK_ERROR="Worker failed with exit code $worker_status; inspect this run's logs"; fi
           export CALLBACK_STATUS CALLBACK_ERROR
           python - <<'PY'
-          import json, os, urllib.request
-          body = json.dumps({'status': os.environ['CALLBACK_STATUS'], 'error': os.environ['CALLBACK_ERROR'], 'result': {'runner': 'github-actions'}}).encode()
-          req = urllib.request.Request(
-              os.environ['CONTROL_PLANE_URL'].rstrip('/') + '/callback/' + os.environ['JOB_ID'],
-              data=body,
-              headers={'content-type': 'application/json', 'x-worker-callback-token': os.environ['WORKER_CALLBACK_TOKEN']},
-              method='POST',
-          )
-          with urllib.request.urlopen(req, timeout=60) as response:
-              print('Control plane callback:', response.status)
+          import json, os, urllib.request, pathlib
+          try: result=json.loads(pathlib.Path('worker-result.json').read_text()) if pathlib.Path('worker-result.json').exists() else {'runner':'github-actions'}
+          except Exception: result={'runner':'github-actions','output_parse_error':True}
+          body=json.dumps({'status':os.environ['CALLBACK_STATUS'],'error':os.environ['CALLBACK_ERROR'],'result':result}).encode()
+          req=urllib.request.Request(os.environ['CONTROL_PLANE_URL'].rstrip('/')+'/callback/'+os.environ['JOB_ID'],data=body,headers={'content-type':'application/json','x-worker-callback-token':os.environ['WORKER_CALLBACK_TOKEN']},method='POST')
+          with urllib.request.urlopen(req,timeout=60) as response: print('Control plane callback:',response.status)
           PY
           callback_status=$?
           if [ "$worker_status" -ne 0 ]; then exit "$worker_status"; fi

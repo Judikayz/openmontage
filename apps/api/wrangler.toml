@@ -22,5 +22,6 @@ bucket_name = "omcs-models"
 [vars]
 MODEL_BUCKET_NAME = "omcs-models"
 ALLOWED_ORIGIN = "https://YOUR-SITE.netlify.app"
+ADMIN_EMAIL = "YOUR-OWNER-EMAIL@example.com"
 
 # ADMIN_EMAIL is the Cloudflare Access email for the owner/admin account.

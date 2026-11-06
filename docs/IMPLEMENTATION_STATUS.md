@@ -3,7 +3,7 @@
 ## Implemented in this revision
 
 - Multi-page React workspace with responsive navigation, dashboard statistics, workflow creation/execution, project CRUD, character-profile CRUD, model registration/import/retry/delete, asset upload/list, schedules, jobs/history, provider credential save/delete/test and connection metadata.
-- D1 migrations for projects, characters, scenes and job logs.
+- D1 migrations for projects, characters, scenes, job logs and user roles.
 - Authenticated internal endpoints for worker job retrieval, asset staging, output upload URL issuance, model manifests, model download URLs, Hugging Face token retrieval for trusted importer runners, and job callbacks.
 - Provider credential encryption at rest using AES-GCM.
 - GitHub dispatch reads the saved GitHub token/owner/repository/ref; worker payload and callbacks are authenticated.
@@ -25,7 +25,7 @@
 - No model weights are bundled.
 - No live GPU inference was run in this build environment.
 - The Kaggle secure dispatcher is external and not automatically provisioned by the Worker.
-- Full team/user invitation and granular RBAC UI are not included; protect the API with Cloudflare Access and restrict the Access application to intended users.
+- User invitation emails are not sent by the application. Administrators assign roles to email addresses, but those users must first be admitted by the Cloudflare Access policy.
 - Multipart model import is implemented; browser-based multipart upload for large user assets is not yet exposed. The current browser asset uploader uses a base64 JSON request and is intended for small inputs.
 - Character reference-conditioned generation produces a conditioned image; it does not mathematically guarantee identity across arbitrary multi-scene video generations.
 - Lip-sync relies on a separately installed Wav2Lip checkout/checkpoint; licensing must be checked for the intended use.

@@ -1,4 +1,6 @@
-import {describe,it,expect} from 'vitest';import{routeJob}from'../src/routing';import{encryptSecret,decryptSecret}from'../src/crypto';
+import {describe,it,expect} from 'vitest';import{routeJob,validateToolBranch}from'../src/routing';import{encryptSecret,decryptSecret}from'../src/crypto';
 const key=btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 describe('compute routing',()=>{it('sends CPU to GitHub in automatic mode',()=>expect(routeJob({tool:'x',payload:{}})).toBe('github'));it('sends GPU task to Kaggle',()=>expect(routeJob({tool:'x',requiresGpu:true,payload:{}})).toBe('kaggle'));it('rejects forced Kaggle for CPU',()=>expect(()=>routeJob({tool:'x',compute:'kaggle',payload:{}})).toThrow());it('honours forced GitHub',()=>expect(routeJob({tool:'x',compute:'github',requiresGpu:true,payload:{}})).toBe('github'));});
 describe('secret encryption',()=>{it('round trips encrypted values',async()=>{const x=await encryptSecret('private-value',key);expect(await decryptSecret(x.ciphertext,x.iv,key)).toBe('private-value');expect(x.ciphertext).not.toContain('private-value');});});
+
+describe('tool branch validation',()=>{it('accepts a packaged tool branch',()=>expect(validateToolBranch('ai-video-generation')).toBe('ai-video-generation'));it('rejects unknown branch names',()=>expect(()=>validateToolBranch('unknown-branch')).toThrow('Unsupported tool branch'));});

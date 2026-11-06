@@ -1,11 +1,12 @@
 import { encryptSecret, decryptSecret } from './crypto';
 import { routeJob, validateToolBranch } from './routing';
 import { presignR2Put, presignR2Get, presignR2MultipartPart } from './r2-presign';
-import { verifyCloudflareAccess } from './access-auth';
+import { verifyCloudflareAccess, getCloudflareAccessClaims } from './access-auth';
 import type { Env, JobInput } from './types';
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','access-control-allow-origin':'null','access-control-allow-headers':'authorization,content-type,x-worker-callback-token,x-model-import-token,cf-access-jwt-assertion','access-control-allow-methods':'GET,POST,PUT,DELETE,OPTIONS'}});
 const now=()=>new Date().toISOString(); const id=()=>crypto.randomUUID();
 async function auth(req:Request,env:Env){if(env.APP_AUTH_TOKEN&&req.headers.get('authorization')===`Bearer ${env.APP_AUTH_TOKEN}`)return true;if(!env.CF_ACCESS_TEAM_DOMAIN||!env.CF_ACCESS_AUD)return false;return verifyCloudflareAccess(req,env.CF_ACCESS_TEAM_DOMAIN,env.CF_ACCESS_AUD);}
+async function currentRole(req:Request,env:Env){if(env.APP_AUTH_TOKEN&&req.headers.get('authorization')===`Bearer ${env.APP_AUTH_TOKEN}`)return 'admin';if(!env.CF_ACCESS_TEAM_DOMAIN||!env.CF_ACCESS_AUD)return 'viewer';const claims=await getCloudflareAccessClaims(req,env.CF_ACCESS_TEAM_DOMAIN,env.CF_ACCESS_AUD);const email=String(claims?.email??'').toLowerCase();if(!email)return 'viewer';if(env.ADMIN_EMAIL&&email===env.ADMIN_EMAIL.toLowerCase())return 'admin';const row=await env.DB.prepare('SELECT role FROM user_roles WHERE email=?').bind(email).first<any>();return row?.role??'viewer';}
 async function getGitHubConfig(env:Env){
  let saved:any=null;
  const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='github'").first<any>();
@@ -59,10 +60,11 @@ async function dispatchKaggle(env:Env,jobId:string,input:JobInput){
  const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='kaggle'").first<any>();
  if(!row) throw new Error('Kaggle credentials are not configured in Settings');
  const credentials=JSON.parse(await decryptSecret(row.ciphertext,row.iv,env.ENCRYPTION_KEY));
- const body={jobId,tool:input.tool,payload:input.payload,kaggle:credentials};
- const endpoint=(input.payload as any).kaggleDispatcherUrl;
- if(!endpoint) throw new Error('Kaggle dispatch requires a configured secure dispatcher URL in job payload; see docs/KAGGLE.md');
- const r=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','x-worker-callback-token':env.WORKER_CALLBACK_TOKEN??''},body:JSON.stringify(body)});
+ const body={jobId,tool:input.tool,payload:input.payload};
+ const endpoint=(input.payload as any).kaggleDispatcherUrl||credentials.dispatcherUrl;
+ if(!endpoint) throw new Error('Kaggle dispatch requires a configured secure dispatcher URL in Settings or workflow payload');
+ if(!env.KAGGLE_DISPATCHER_TOKEN)throw new Error('Set KAGGLE_DISPATCHER_TOKEN to authenticate the secure Kaggle dispatcher');
+ const r=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${env.KAGGLE_DISPATCHER_TOKEN}`},body:JSON.stringify(body)});
  if(!r.ok) throw new Error(`Kaggle dispatcher rejected job (${r.status})`);
 }
 async function handle(req:Request,env:Env){
@@ -78,6 +80,10 @@ async function handle(req:Request,env:Env){
   if(!job)return json({error:'Job not found'},404);
   await env.DB.prepare('UPDATE jobs SET status=?,updated_at=? WHERE id=?').bind('running',now(),jobId).run();
   return json({id:job.id,status:'running',provider:job.provider,tool:job.tool,payload:JSON.parse(job.payload_json)});
+ }
+ if(path==='/internal/kaggle/credentials'&&req.method==='GET'){
+  if(!env.KAGGLE_DISPATCHER_TOKEN||req.headers.get('authorization')!==`Bearer ${env.KAGGLE_DISPATCHER_TOKEN}`)return json({error:'Unauthorized'},401);
+  const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='kaggle'").first<any>();if(!row)return json({error:'Kaggle credentials not configured'},404);const credentials=JSON.parse(await decryptSecret(row.ciphertext,row.iv,env.ENCRYPTION_KEY));return json({username:credentials.username,key:credentials.key});
  }
  if(path==='/internal/assets/download'&&req.method==='GET'){
   if(!env.WORKER_CALLBACK_TOKEN||req.headers.get('x-worker-callback-token')!==env.WORKER_CALLBACK_TOKEN)return json({error:'Unauthorized'},401);
@@ -137,7 +143,18 @@ async function handle(req:Request,env:Env){
   if(action==='failed'&&req.method==='POST'){const b=await req.json<any>();await env.DB.prepare('UPDATE models SET status=?,error=?,updated_at=? WHERE id=?').bind('failed',String(b.error??'Import failed').slice(0,2000),now(),modelId).run();return json({ok:true});}
  }
  if(!(await auth(req,env)))return json({error:'Unauthorized'},401);
+ const role=await currentRole(req,env);if(req.method!=='GET'&&role==='viewer')return json({error:'Viewer role is read-only. Ask an administrator for editor access.'},403);
+ if((path.startsWith('/api/secrets')||path==='/api/integrations/test'||path.startsWith('/api/users'))&&role!=='admin')return json({error:'Administrator role required'},403);
  try {
+  if(path==='/api/users'&&req.method==='GET'){const r=await env.DB.prepare('SELECT id,email,role,created_at,updated_at FROM user_roles ORDER BY email').all();return json(r.results);}
+  if(path==='/api/users'&&req.method==='POST'){const b=await req.json<any>();const email=String(b.email??'').trim().toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!['admin','editor','viewer'].includes(b.role))throw new Error('Valid email and role (admin/editor/viewer) are required');if(env.ADMIN_EMAIL&&email===env.ADMIN_EMAIL.toLowerCase())throw new Error('The configured owner account cannot be changed here');const uid=id(),ts=now();await env.DB.prepare('INSERT INTO user_roles(id,email,role,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role,updated_at=excluded.updated_at').bind(uid,email,b.role,ts,ts).run();return json({email,role:b.role},201);}
+  if(path.startsWith('/api/users/')&&req.method==='DELETE'){await env.DB.prepare('DELETE FROM user_roles WHERE id=?').bind(path.split('/').pop()).run();return json({ok:true});}
+  if(path==='/api/ai/prompt'&&req.method==='POST'){
+   const b=await req.json<any>();if(!b.prompt||!String(b.prompt).trim())throw new Error('Prompt is required');const row=await env.DB.prepare("SELECT ciphertext,iv FROM secrets WHERE provider='gemini'").first<any>();if(!row)throw new Error('Save a Gemini API key in Integrations first');const v=JSON.parse(await decryptSecret(row.ciphertext,row.iv,env.ENCRYPTION_KEY));const key=v.apiKey??v.token??v.key;const model=String(v.defaultModel??'gemini-2.5-flash');if(!key)throw new Error('Gemini apiKey is missing');const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:`Improve this AI video production prompt. Preserve the user's intent and facts. Return only the improved production prompt, with subject, action, environment, camera movement, lens/composition, lighting, visual style and temporal continuity. Do not invent named people or brands.
+
+USER PROMPT:
+${String(b.prompt).slice(0,12000)}`}]}],generationConfig:{temperature:0.6,maxOutputTokens:1200}})});if(!response.ok)throw new Error(`Gemini prompt enhancement failed (${response.status}): ${(await response.text()).slice(0,400)}`);const data=await response.json<any>();const text=data.candidates?.[0]?.content?.parts?.map((x:any)=>x.text??'').join('').trim();if(!text)throw new Error('Gemini returned no prompt text');return json({prompt:text,model});
+  }
   if(path==='/api/projects'&&req.method==='GET'){const r=await env.DB.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();return json(r.results);}
   if(path==='/api/projects'&&req.method==='POST'){const b=await req.json<any>();if(!b.name)throw new Error('Project name is required');const pid=id(),ts=now();await env.DB.prepare('INSERT INTO projects(id,name,description,settings_json,created_at,updated_at) VALUES(?,?,?,?,?,?)').bind(pid,String(b.name).slice(0,160),String(b.description??''),JSON.stringify(b.settings??{}),ts,ts).run();return json({id:pid,name:b.name},201);}
   if(path.startsWith('/api/projects/')){const pid=path.split('/')[3];if(req.method==='DELETE'){await env.DB.prepare('DELETE FROM projects WHERE id=?').bind(pid).run();return json({ok:true});}if(req.method==='PUT'){const b=await req.json<any>();await env.DB.prepare('UPDATE projects SET name=?,description=?,settings_json=?,updated_at=? WHERE id=?').bind(b.name,b.description??'',JSON.stringify(b.settings??{}),now(),pid).run();return json({ok:true});}}

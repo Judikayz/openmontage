@@ -12,7 +12,8 @@ def main():
  operations=j.get('operations') or ['color-grade','transcode']
  temp=out.with_name(out.stem+'.intermediate.mp4');current=src
  if 'upscale' in operations:
-  exe=os.environ.get('REALESRGAN_BIN')
+  exe=j.get('realesrganBin') or os.environ.get('REALESRGAN_BIN')
+  if exe and not pathlib.Path(exe).is_absolute() and (pathlib.Path(os.environ.get('MODEL_DIR',''))/exe).exists():exe=str(pathlib.Path(os.environ.get('MODEL_DIR',''))/exe)
   if not exe:raise SystemExit('upscale requested but REALESRGAN_BIN is not configured; refusing to claim AI upscaling')
   updir=out.parent/'upscaled';updir.mkdir(exist_ok=True);run([exe,'-i',str(current),'-o',str(updir),'-n',j.get('upscaleModel','realesrgan-x4plus')]);candidate=updir/(pathlib.Path(current).stem+'.mp4')
   if candidate.exists():current=str(candidate)

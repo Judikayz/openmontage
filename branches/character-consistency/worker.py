@@ -16,9 +16,10 @@ def main():
   from diffusers import StableDiffusionXLPipeline
  except Exception as e:raise SystemExit(f'Diffusers/IP-Adapter runtime unavailable: {e}')
  model=root/str(ids[0]);pipe=StableDiffusionXLPipeline.from_pretrained(str(model),torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,local_files_only=True)
- ip=os.environ.get('IP_ADAPTER_MODEL')
+ ip=j.get('ipAdapterModel') or os.environ.get('IP_ADAPTER_MODEL')
+ if ip and not pathlib.Path(ip).is_absolute() and (root/ip).exists():ip=str(root/ip)
  if not ip:raise SystemExit('Set IP_ADAPTER_MODEL to a compatible IP-Adapter weight path/repository; identity reference conditioning will not be faked')
- pipe.load_ip_adapter(ip,subfolder=os.environ.get('IP_ADAPTER_SUBFOLDER',''),weight_name=os.environ.get('IP_ADAPTER_WEIGHT','ip-adapter_sdxl.bin'))
+ pipe.load_ip_adapter(ip,subfolder=j.get('ipAdapterSubfolder') or os.environ.get('IP_ADAPTER_SUBFOLDER',''),weight_name=j.get('ipAdapterWeight') or os.environ.get('IP_ADAPTER_WEIGHT','ip-adapter_sdxl.bin'))
  if torch.cuda.is_available():pipe.to('cuda')
  ref=refs[0]
  if not os.path.isfile(ref):raise SystemExit(f'Reference asset must be staged as a local file: {ref}')

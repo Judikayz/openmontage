@@ -5,3 +5,9 @@ export function routeJob(job: JobInput): Provider {
   if (job.compute && job.compute !== 'automatic') throw new Error('Unsupported compute mode');
   return job.requiresGpu ? 'kaggle' : 'github';
 }
+
+export const TOOL_BRANCHES = ['ai-video-generation','character-consistency','lip-sync','cinematic-realism','openmontage-integration'] as const;
+export function validateToolBranch(tool: string): string {
+  if (!TOOL_BRANCHES.includes(tool as typeof TOOL_BRANCHES[number])) throw new Error(`Unsupported tool branch: ${tool}`);
+  return tool;
+}

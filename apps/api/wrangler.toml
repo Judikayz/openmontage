@@ -14,3 +14,11 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "ASSETS"
 bucket_name = "omcs-assets"
+
+[[r2_buckets]]
+binding = "MODELS"
+bucket_name = "omcs-models"
+
+[vars]
+MODEL_BUCKET_NAME = "omcs-models"
+ALLOWED_ORIGIN = "https://YOUR-SITE.netlify.app"

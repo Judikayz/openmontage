@@ -1,0 +1,16 @@
+name = "openmontage-cloud-studio-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "omcs"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "omcs-assets"

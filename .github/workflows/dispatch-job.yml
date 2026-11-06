@@ -1,0 +1,27 @@
+name: Dispatch CPU job
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: {description: Control-plane job ID, required: true, type: string}
+      tool: {description: Tool branch key, required: true, type: string}
+permissions: {contents: read}
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: main}
+      - uses: actions/checkout@v4
+        with: {ref: ${{ inputs.tool }} , path: tool-src}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11', cache: pip, cache-dependency-path: tool-src/requirements.txt}
+      - name: Validate job and execute contract
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          WORKER_CALLBACK_TOKEN: ${{ secrets.WORKER_CALLBACK_TOKEN }}
+          JOB_ID: ${{ inputs.job_id }}
+          TOOL_BRANCH: ${{ inputs.tool }}
+        run: |
+          python -m pip install -r tool-src/requirements.txt
+          python tool-src/worker.py --job-id "$JOB_ID" --control-plane "$CONTROL_PLANE_URL"

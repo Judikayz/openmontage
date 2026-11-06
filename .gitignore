@@ -11,3 +11,6 @@ __pycache__
 models/
 outputs/
 *.bundle
+
+*.tsbuildinfo
+node_modules/

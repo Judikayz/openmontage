@@ -9,7 +9,8 @@ def main():
  if not video or not audio:raise SystemExit('videoAsset and audioAsset local file paths are required')
  for p in (video,audio):
   if not pathlib.Path(p).is_file():raise SystemExit(f'Input asset does not exist on runner: {p}')
- repo=pathlib.Path(os.environ.get('WAV2LIP_HOME','/opt/Wav2Lip'));checkpoint=os.environ.get('WAV2LIP_CHECKPOINT')
+ repo=pathlib.Path(j.get('wav2lipHome') or os.environ.get('WAV2LIP_HOME','/opt/Wav2Lip'));checkpoint=j.get('wav2lipCheckpointPath') or os.environ.get('WAV2LIP_CHECKPOINT')
+ if checkpoint and not pathlib.Path(checkpoint).is_absolute():checkpoint=str(pathlib.Path(os.environ.get('MODEL_DIR','/tmp'))/checkpoint)
  if not (repo/'inference.py').is_file() or not checkpoint or not pathlib.Path(checkpoint).is_file():raise SystemExit('Configure WAV2LIP_HOME to a licensed Wav2Lip checkout and WAV2LIP_CHECKPOINT to its checkpoint file; no lip-sync simulation is performed')
  out=pathlib.Path(j.get('outputPath','/tmp/lipsynced.mp4'));out.parent.mkdir(parents=True,exist_ok=True)
  cmd=['python',str(repo/'inference.py'),'--checkpoint_path',checkpoint,'--face',str(video),'--audio',str(audio),'--outfile',str(out)]

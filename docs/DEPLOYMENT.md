@@ -34,7 +34,7 @@ Restore the included Git bundle and push the six branches listed in `BRANCHES.md
 - `MODEL_IMPORT_WORKER_TOKEN`: same value as the Worker secret.
 - `WORKER_CALLBACK_TOKEN`: same value as the Worker secret.
 
-Enable GitHub Actions. Standard GitHub-hosted runners are CPU-only; GPU-required jobs route to Kaggle and require the trusted dispatcher. Model import and CPU-compatible workflows run on GitHub Actions.
+Enable GitHub Actions. For lip-sync, optionally add `WAV2LIP_REPO_URL` as a GitHub Actions secret pointing to a licensed Wav2Lip checkout. Standard GitHub-hosted runners are CPU-only; GPU-required jobs route to Kaggle and require the trusted dispatcher. Model import and CPU-compatible workflows run on GitHub Actions.
 
 ## 5. Frontend
 

@@ -15,7 +15,7 @@
 
 - Diffusers video generation: compatible Diffusers pipeline/model repository, PyTorch, appropriate CUDA/GPU resources for the chosen model, and a supported pipeline return type. Set `OM_PIPELINE_CLASS` for models requiring a specific pipeline class.
 - Character reference conditioning: compatible SDXL/SD1.5 Diffusers model, local reference images, and `IP_ADAPTER_MODEL`/weight configuration.
-- Lip-sync: a licensed Wav2Lip checkout in `WAV2LIP_HOME` and checkpoint in `WAV2LIP_CHECKPOINT`.
+- Lip-sync: a licensed Wav2Lip checkout (optionally cloned from the GitHub Actions secret `WAV2LIP_REPO_URL`) and checkpoint path configured in the workflow/model cache or `WAV2LIP_CHECKPOINT`.
 - Cinematic enhancement: FFmpeg is required. `upscale` additionally requires `REALESRGAN_BIN` and a compatible model executable. Denoise/color-grade/transcode operations are real FFmpeg filters, not AI inference.
 - Kaggle: saved Kaggle credentials and a secure dispatcher endpoint are required. The Worker does not execute Kaggle kernels itself.
 - Cloudflare, GitHub, Hugging Face, R2 and Kaggle credentials must be configured by the owner.

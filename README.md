@@ -6,8 +6,8 @@ OpenMontage Cloud Studio is a cloud control plane and worker suite for AI-assist
 
 - Responsive workspace pages for dashboard, projects, workflow builder, AI tools, character profiles, lip-sync, cinematic finishing, model library, storage, schedules, jobs, integrations, settings and history.
 - Cloudflare Worker API for projects, characters, workflows, jobs, job logs, encrypted provider secrets, models, assets and schedules.
-- D1 migrations for production projects, characters, scenes, job logs, provider test history and multipart upload metadata.
-- AES-GCM encrypted provider credentials. Secrets are never returned to the frontend.
+- D1 migrations for production projects, characters, scenes, job logs, provider test history, multipart upload metadata and user roles.
+- AES-GCM encrypted provider credentials. Secrets are never returned to the frontend. Cloudflare Access-backed admin/editor/viewer role checks are available; set `ADMIN_EMAIL` for the owner account.
 - GitHub Actions job dispatch, authenticated payload retrieval, asset staging, worker execution and result callbacks.
 - Hugging Face model registration with revision pinning, private/gated access token support, resumable downloads, SHA-256 verification and R2 single-part or multipart uploads.
 - R2-backed model restoration for GitHub Actions workers. The GitHub cache is an optimization; R2 remains the durable store.
@@ -24,7 +24,7 @@ A worker adapter is not the same as a bundled model. Large model weights are not
 2. Set `database_id` and exact allowed frontend origin in `apps/api/wrangler.toml`.
 3. Apply all migrations in `apps/api/migrations` and deploy the Worker.
 4. Set Worker secrets: `ENCRYPTION_KEY` (base64 32-byte key), `MODEL_IMPORT_WORKER_TOKEN`, `WORKER_CALLBACK_TOKEN`. Configure GitHub dispatch variables/secrets as documented in `docs/DEPLOYMENT.md`.
-5. Protect the Worker with Cloudflare Access. Do not put API keys or bearer tokens in `VITE_*` frontend variables.
+5. Protect the Worker with Cloudflare Access. Set `ADMIN_EMAIL` to the owner login and admit intended team members in the Access policy. Assign editor/viewer roles in the Users page. Do not put API keys or bearer tokens in `VITE_*` frontend variables.
 6. Deploy `apps/web` with `VITE_API_BASE_URL` pointing to the Worker.
 7. Add GitHub Actions secrets `CONTROL_PLANE_URL`, `MODEL_IMPORT_WORKER_TOKEN`, and `WORKER_CALLBACK_TOKEN`.
 8. In Integrations, save R2 credentials as JSON: `{"accountId":"...","accessKeyId":"...","secretAccessKey":"...","bucketName":"omcs-models"}`. Test R2 before importing models.

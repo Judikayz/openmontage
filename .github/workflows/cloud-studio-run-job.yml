@@ -16,7 +16,7 @@ jobs:
         env: {TOOL: "${{ inputs.tool }}"}
         run: |
           case "$TOOL" in
-            ai-video-generation|character-consistency|lip-sync|cinematic-realism|openmontage-integration|demo-recorder) ;;
+            ai-video-generation|character-consistency|lip-sync|cinematic-realism|openmontage-integration|narrated-demo) ;;
             *) echo "Unknown tool: $TOOL"; exit 1 ;;
           esac
       - uses: actions/setup-python@v5
@@ -60,13 +60,11 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as envfile:
               envfile.write(f"JOB_PAYLOAD_JSON_B64={encoded}\n")
           PY
-      - name: Install browser and voice tools (demo-recorder only)
-        if: ${{ inputs.tool == 'demo-recorder' }}
+      - name: Install the fallback voice (narrated-demo only)
+        if: ${{ inputs.tool == 'narrated-demo' }}
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q espeak-ng
-          python -m pip install --disable-pip-version-check -r cloud-studio/branches/${{ inputs.tool }}/requirements.txt
-          python -m playwright install --with-deps chromium
       - name: Execute tool and report result
         env:
           CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}

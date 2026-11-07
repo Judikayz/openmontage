@@ -1,0 +1,109 @@
+name: Cloud Studio - run job
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: {description: Control-plane job ID, required: true, type: string}
+      tool: {description: Tool key, required: true, type: string}
+      model_ids: {description: Comma-separated registered model IDs, required: false, type: string}
+permissions: {contents: read}
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tool name
+        env: {TOOL: "${{ inputs.tool }}"}
+        run: |
+          case "$TOOL" in
+            ai-video-generation|character-consistency|lip-sync|cinematic-realism|openmontage-integration|demo-recorder) ;;
+            *) echo "Unknown tool: $TOOL"; exit 1 ;;
+          esac
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11', cache: pip, cache-dependency-path: "cloud-studio/branches/${{ inputs.tool }}/requirements.txt"}
+      - uses: actions/cache@v4
+        if: ${{ inputs.model_ids != '' }}
+        with:
+          path: ~/.cache/omcs-models
+          key: omcs-models-${{ hashFiles('cloud-studio/infra/model-cache/cache-key.sh', format('cloud-studio/branches/{0}/requirements.txt', inputs.tool)) }}-${{ inputs.model_ids }}
+          restore-keys: |
+            omcs-models-${{ hashFiles('cloud-studio/infra/model-cache/cache-key.sh', format('cloud-studio/branches/{0}/requirements.txt', inputs.tool)) }}-
+      - name: Restore model weights from cache or R2
+        if: ${{ inputs.model_ids != '' }}
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          MODEL_IMPORT_WORKER_TOKEN: ${{ secrets.MODEL_IMPORT_WORKER_TOKEN }}
+          MODEL_IDS: ${{ inputs.model_ids }}
+          OMCS_MODEL_CACHE: ~/.cache/omcs-models
+        run: |
+          python -m pip install --disable-pip-version-check requests
+          python cloud-studio/infra/model-cache/restore_models.py
+      - name: Fetch authenticated job payload
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          WORKER_CALLBACK_TOKEN: ${{ secrets.WORKER_CALLBACK_TOKEN }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          base = os.environ['CONTROL_PLANE_URL'].rstrip('/')
+          token = os.environ['WORKER_CALLBACK_TOKEN']
+          req = urllib.request.Request(
+              f"{base}/internal/jobs/{os.environ['JOB_ID']}",
+              headers={'x-worker-callback-token': token},
+          )
+          with urllib.request.urlopen(req, timeout=60) as response:
+              job = json.load(response)
+          import base64
+          payload = json.dumps(job['payload'], separators=(',', ':')).encode()
+          encoded = base64.b64encode(payload).decode()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as envfile:
+              envfile.write(f"JOB_PAYLOAD_JSON_B64={encoded}\n")
+          PY
+      - name: Install browser and voice tools (demo-recorder only)
+        if: ${{ inputs.tool == 'demo-recorder' }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q espeak-ng
+          python -m pip install --disable-pip-version-check -r cloud-studio/branches/${{ inputs.tool }}/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Execute tool and report result
+        env:
+          CONTROL_PLANE_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          WORKER_CALLBACK_TOKEN: ${{ secrets.WORKER_CALLBACK_TOKEN }}
+          JOB_ID: ${{ inputs.job_id }}
+          TOOL: ${{ inputs.tool }}
+          WAV2LIP_REPO_URL: ${{ secrets.WAV2LIP_REPO_URL }}
+          OMCS_MODEL_CACHE: ~/.cache/omcs-models
+        run: |
+          set +e
+          python -m pip install --disable-pip-version-check -r cloud-studio/branches/${{ inputs.tool }}/requirements.txt
+          install_status=$?
+          export MODEL_DIR="$HOME/.cache/omcs-models"
+          if [ "$install_status" -eq 0 ]; then
+            if [ "$TOOL" = "lip-sync" ] && [ -n "$WAV2LIP_REPO_URL" ]; then git clone --depth 1 "$WAV2LIP_REPO_URL" /tmp/Wav2Lip && export WAV2LIP_HOME=/tmp/Wav2Lip; fi
+            export JOB_PAYLOAD_JSON="$(python -c 'import os,base64;print(base64.b64decode(os.environ["JOB_PAYLOAD_JSON_B64"]).decode())')"
+            python cloud-studio/infra/worker/stage_assets.py
+            stage_status=$?
+            if [ "$stage_status" -eq 0 ]; then
+              export JOB_PAYLOAD_JSON="$(cat /tmp/omcs-job-payload.json)"
+              python cloud-studio/branches/$TOOL/worker.py --job-id "$JOB_ID" --control-plane "$CONTROL_PLANE_URL" > worker-result.json
+              worker_status=$?
+            else worker_status=$stage_status; fi
+          else worker_status=$install_status; fi
+          if [ "$worker_status" -eq 0 ]; then CALLBACK_STATUS=completed; CALLBACK_ERROR=""; else CALLBACK_STATUS=failed; CALLBACK_ERROR="Worker failed with exit code $worker_status; inspect this run's logs"; fi
+          export CALLBACK_STATUS CALLBACK_ERROR
+          python - <<'PY'
+          import json, os, urllib.request, pathlib
+          result={'runner':'github-actions'}
+          if pathlib.Path('worker-result.json').exists():
+              for line in reversed(pathlib.Path('worker-result.json').read_text(errors='replace').splitlines()):
+                  try: result=json.loads(line); break
+                  except Exception: continue
+          body=json.dumps({'status':os.environ['CALLBACK_STATUS'],'error':os.environ['CALLBACK_ERROR'],'result':result}).encode()
+          req=urllib.request.Request(os.environ['CONTROL_PLANE_URL'].rstrip('/')+'/callback/'+os.environ['JOB_ID'],data=body,headers={'content-type':'application/json','x-worker-callback-token':os.environ['WORKER_CALLBACK_TOKEN']},method='POST')
+          with urllib.request.urlopen(req,timeout=60) as response: print('Control plane callback:',response.status)
+          PY
+          callback_status=$?
+          if [ "$worker_status" -ne 0 ]; then exit "$worker_status"; fi
+          if [ "$callback_status" -ne 0 ]; then exit "$callback_status"; fi

@@ -1,0 +1,16 @@
+node_modules
+.dist
+dist
+.env
+.env.*
+!.env.example
+.wrangler
+__pycache__
+*.pyc
+.cache
+models/
+outputs/
+*.bundle
+
+*.tsbuildinfo
+node_modules/

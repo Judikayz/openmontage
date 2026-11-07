@@ -1,0 +1,8 @@
+torch>=2.4
+transformers>=4.45
+diffusers>=0.31
+accelerate>=1.1
+safetensors>=0.4
+Pillow>=10
+imageio[ffmpeg]>=2.36
+requests>=2.32

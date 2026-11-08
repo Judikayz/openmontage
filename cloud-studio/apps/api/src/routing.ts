@@ -6,9 +6,9 @@ export function routeJob(job: JobInput): Provider {
   return job.requiresGpu ? 'kaggle' : 'github';
 }
 
-export const TOOL_BRANCHES = ['ai-video-generation','character-consistency','lip-sync','cinematic-realism','openmontage-integration','narrated-demo'] as const;
+export const TOOL_BRANCHES = ['ai-video-generation','character-consistency','lip-sync','cinematic-realism','openmontage-integration','voiceover'] as const;
 // Credentials a GitHub runner may read (over the authenticated callback token). Nothing else is ever exposed.
-export const WORKER_READABLE_CREDENTIALS = ['gemini'];
+export const WORKER_READABLE_CREDENTIALS = ['gemini','elevenlabs'];
 export function validateToolBranch(tool: string): string {
   if (!TOOL_BRANCHES.includes(tool as typeof TOOL_BRANCHES[number])) throw new Error(`Unsupported tool branch: ${tool}`);
   return tool;
@@ -16,7 +16,7 @@ export function validateToolBranch(tool: string): string {
 
 // Only tools whose workers were exercised against real video are enabled by default.
 // The rest need a GPU, model weights or checkpoints and have NOT been tested end to end.
-export const VERIFIED_TOOLS = ['cinematic-realism','openmontage-integration','narrated-demo'] as const;
+export const VERIFIED_TOOLS = ['cinematic-realism','openmontage-integration','voiceover'] as const;
 export function assertToolEnabled(tool: string, experimental: boolean, compute?: string): void {
   if (experimental) return;
   if (!VERIFIED_TOOLS.includes(tool as typeof VERIFIED_TOOLS[number])) throw new Error(`${tool} is experimental and untested, so it is disabled. Set EXPERIMENTAL_TOOLS=true on the Worker to enable it at your own risk.`);

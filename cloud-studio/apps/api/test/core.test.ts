@@ -7,9 +7,9 @@ describe('tool branch validation',()=>{it('accepts a packaged tool branch',()=>e
 import {presignR2MultipartPart} from '../src/r2-presign';
 describe('R2 multipart presigning',()=>{it('signs a numbered multipart upload part with its upload ID',async()=>{const url=await presignR2MultipartPart({accountId:'account',accessKeyId:'access',secretAccessKey:'secret',bucket:'models',key:'models/demo/weights.bin',uploadId:'upload-123',partNumber:2});const parsed=new URL(url);expect(parsed.searchParams.get('partNumber')).toBe('2');expect(parsed.searchParams.get('uploadId')).toBe('upload-123');expect(parsed.searchParams.get('X-Amz-Signature')).toMatch(/^[a-f0-9]{64}$/);});});
 
-describe('worker-readable credentials',()=>{it('exposes only the Gemini key',()=>{expect([...WORKER_READABLE_CREDENTIALS]).toEqual(['gemini']);for(const p of ['github','r2','kaggle','huggingface','proxy','demo-signup'])expect(WORKER_READABLE_CREDENTIALS).not.toContain(p);});});
+describe('worker-readable credentials',()=>{it('exposes only the Gemini and ElevenLabs keys',()=>{expect([...WORKER_READABLE_CREDENTIALS].sort()).toEqual(['elevenlabs','gemini']);for(const p of ['github','r2','kaggle','huggingface','proxy','demo-signup'])expect(WORKER_READABLE_CREDENTIALS).not.toContain(p);});});
 describe('untested tools are disabled by default',()=>{
- it('allows the verified CPU tools',()=>{expect(()=>assertToolEnabled('openmontage-integration',false)).not.toThrow();expect(()=>assertToolEnabled('cinematic-realism',false,'github')).not.toThrow();expect(()=>assertToolEnabled('narrated-demo',false)).not.toThrow();expect(validateToolBranch('narrated-demo')).toBe('narrated-demo');});
+ it('allows the verified CPU tools',()=>{expect(()=>assertToolEnabled('openmontage-integration',false)).not.toThrow();expect(()=>assertToolEnabled('cinematic-realism',false,'github')).not.toThrow();expect(()=>assertToolEnabled('voiceover',false)).not.toThrow();expect(validateToolBranch('voiceover')).toBe('voiceover');});
  it('blocks GPU and model tools',()=>{for(const t of ['ai-video-generation','character-consistency','lip-sync'])expect(()=>assertToolEnabled(t,false)).toThrow(/experimental/);});
  it('blocks Kaggle unless experimental',()=>{expect(()=>assertToolEnabled('cinematic-realism',false,'kaggle')).toThrow(/Kaggle/);expect(()=>assertToolEnabled('lip-sync',true,'kaggle')).not.toThrow();});
 });
